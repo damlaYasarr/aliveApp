@@ -1,21 +1,21 @@
 package database
+
 import (
 	"fmt"
 	"log"
 	"os"
 
-	"github.com/divrhino/divrhino-trivia/models"
+	"github.com/damlaYasarr/aliveApp/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
-type DbInstance struct{
-	Db *gorm.Db
-
+type DbInstance struct {
+	Db *gorm.DB
 }
 
-var DB Dbinstance
+var DB DbInstance
 
 func ConnectDb() {
 	dsn := fmt.Sprintf(
@@ -38,9 +38,9 @@ func ConnectDb() {
 	db.Logger = logger.Default.LogMode(logger.Info)
 
 	log.Println("running migrations")
-	db.AutoMigrate(&models.Fact{})
-
-	DB = Dbinstance{
+	db.AutoMigrate(&models.User{})
+	db.AutoMigrate(&models.Aim{})
+	DB = DbInstance{
 		Db: db,
 	}
 }
