@@ -1,16 +1,28 @@
 # alive mobile app
 
 # purpose 
+<<<<<<< HEAD
 - this is the mobile application which is about tracking habit 
+=======
+- this is a mobile application that is about tracking habit 
+>>>>>>> 8d25ad137ae8795e7776ac9b5ab8290fab9fa973
 - the main purpose is personal development
 
 # dependencies 
 
+<<<<<<< HEAD
 - firebase notificaiton
 - flutter mobile UI
 - golang backend 
 - postgresql database 
 - aws deployment(so soon)
+=======
+- firebase notification
+- flutter mobile UI
+- golang backend 
+- PostgreSQL database 
+- AWS deployment(so soon)
+>>>>>>> 8d25ad137ae8795e7776ac9b5ab8290fab9fa973
 
 ## starting 
 
@@ -28,14 +40,14 @@
 
 ### how to create this project (step by step)
 - added docker-compose.yml with the requirements for the project
-- added dockerfile to create container 
-- docker cpmpose up for running docker
+- added docker file to create a container 
+- docker compose up for running docker
 - docker compose build for saving changes in the file 
 - docker compose run --service-ports web bash --> this is to run file in docker server
 - build every dependencies of project in docker
 - go mod init github.com/damlaYasarr/aliveApp
 - go get github.com/gofiber/fiber/v2
 - go run cmd/main.go -b 0.0.0.0 -> starting server in docker
-- go install github.com/cosmtrek/air@latest this is better building process on terminal. for more information. [read here](!https://github.com/cosmtrek/air) 
+- go install github.com/cosmtrek/air@latest this is a better building process on the terminal. for more information. [read here](!https://github.com/cosmtrek/air) 
 - go get gorm.io/gorm --> this is for database
 -  go get gorm.io/driver/postgres --1 orm style makes manipulating simple in an object-oriented way 
