@@ -1,8 +1,29 @@
+# alive mobile app
+
+# purpose 
+- this is the mobile application which is about tracking habit 
+- the main purpose is personal development
+
+# dependencies 
+
+- firebase notificaiton
+- flutter mobile UI
+- golang backend 
+- postgresql database 
+- aws deployment(so soon)
+
+## starting 
+
+(for backend) 
+- git clone project
+- docker compose up 
+- docker compose build 
+- docker compose run --service-ports web bash 
 
 
 
-
-
+## application folder structure 
+## system design 
 
 
 ### how to create this project (step by step)
