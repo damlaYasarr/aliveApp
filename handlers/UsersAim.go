@@ -5,6 +5,7 @@ import (
 	"github.com/damlaYasarr/aliveApp/models"
 	"github.com/gofiber/fiber/v2"
 	"net/http"
+    "gorm.io/gorm"
 	
 )
 
@@ -77,10 +78,70 @@ func ListUsersAllAim(c *fiber.Ctx) error {
     return c.Status(http.StatusOK).JSON(aims)
 }
 
-//delete aim
+// get habit by name
+func GetHabitByName(db *gorm.DB, name string) (*models.Aim, error) {
+    var habit models.Aim
+    if err := db.Where("name = ?", name).First(&habit).Error; err != nil {
+        return nil, err
+    }
+
+    return &habit, nil
+}
+//delete habit its name
+func DeleteHabitByName(c *fiber.Ctx) error {
+    // Parse the request body
+    var requestBody struct {
+        Name string `json:"name"`
+    }
+    if err := c.BodyParser(&requestBody); err != nil {
+        return c.Status(fiber.StatusBadRequest).SendString("Invalid request body")
+    }
+
+    // Retrieve the habit name from the request body
+    name := requestBody.Name
+
+    // Retrieve the database instance from Fiber context
+    db := c.Locals("db").(*gorm.DB)
+
+    // Find the habit by its name
+    var habit models.Aim
+    if err := db.Where("name = ?", name).First(&habit).Error; err != nil {
+        return c.Status(fiber.StatusNotFound).SendString("Habit not found")
+    }
+
+    // Delete the habit
+    if err := db.Delete(&habit).Error; err != nil {
+        return c.Status(fiber.StatusInternalServerError).SendString("Failed to delete habit")
+    }
+
+    return c.SendString("Habit deleted successfully")
+}
+// edit habit by name_ use gethabit name func here 
+func EditHabitName(db *gorm.DB, currentName string, newName string) error {
+    // Find the habit by its current name
+    var habit models.Aim
+    if err := db.Where("name = ?", currentName).First(&habit).Error; err != nil {
+        return err // Return error if habit with given current name is not found
+    }
+
+    // Update the habit's name
+    habit.Name = newName
+
+    // Save the changes to the database
+    if err := db.Save(&habit).Error; err != nil {
+        return err // Return error if saving fails
+    }
+
+    return nil // Return nil if editing is successful
+}
+
+
+
 //arrange calendar
 //arrange user as a premium
 //get the all resuult
+
+
 
 //conversation with premium part
 func PremiumUser(c *fiber.Ctx) error {

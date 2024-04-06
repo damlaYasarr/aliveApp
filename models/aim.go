@@ -4,7 +4,7 @@ import "gorm.io/gorm"
 
 type Aim struct {
 	gorm.Model
-	ID               int64  `json:"id" gorm:"primaryKey"`
+	ID int64 `json:"id" gorm:"primaryKey"`
 	USERID           int64 `json: "user_id" `
 	Name             string `json:"name" gorm:"type:varchar(50);default:null"`
 	Startday         string `json:"startday" gorm:"type:varchar(50);default:null"`

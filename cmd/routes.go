@@ -11,4 +11,10 @@ func xRoutes(app *fiber.App) {
 	app.Post("/postemail", handlers.RegisterAppWithEmail)
 
 	app.Post("/addnewaim", handlers.AddnewAim)
+
+	app.Get("/getall", handlers.ListUsersAllAim)
+	
+	//app.Put("/edithabit",  handlers.EditHabitName)
+	app.Delete("/deletehabit/:name", handlers.DeleteHabitByName)
+
 }
