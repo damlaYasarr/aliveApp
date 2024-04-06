@@ -1,28 +1,21 @@
 # alive mobile app
 
 # purpose 
-<<<<<<< HEAD
+
 - this is the mobile application which is about tracking habit 
-=======
-- this is a mobile application that is about tracking habit 
->>>>>>> 8d25ad137ae8795e7776ac9b5ab8290fab9fa973
+
 - the main purpose is personal development
 
 # dependencies 
 
-<<<<<<< HEAD
+
 - firebase notificaiton
 - flutter mobile UI
 - golang backend 
 - postgresql database 
 - aws deployment(so soon)
-=======
-- firebase notification
-- flutter mobile UI
-- golang backend 
-- PostgreSQL database 
-- AWS deployment(so soon)
->>>>>>> 8d25ad137ae8795e7776ac9b5ab8290fab9fa973
+
+
 
 ## starting 
 
@@ -51,3 +44,5 @@
 - go install github.com/cosmtrek/air@latest this is a better building process on the terminal. for more information. [read here](!https://github.com/cosmtrek/air) 
 - go get gorm.io/gorm --> this is for database
 -  go get gorm.io/driver/postgres --1 orm style makes manipulating simple in an object-oriented way 
+-  go get github.com/markbates/goth -->  google auth and for more [go](!https://github.com/markbates/goth) 
+- go get github.com/gorilla/sessions  // 

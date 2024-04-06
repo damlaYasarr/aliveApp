@@ -1,16 +1,26 @@
 package main
 
-import ("github.com/gofiber/fiber/v2"
-
-"github.com/damlaYasarr/aliveApp/database")
+import (
+   
+    "github.com/damlaYasarr/aliveApp/database"
+    "github.com/gofiber/fiber/v2"
+)
 
 func main() {
-	database.ConnectDb()
-    app := fiber.New()
+    database.ConnectDb()
 
-    app.Get("/", func(c *fiber.Ctx) error {
-        return c.SendString("hüloğğ annem")
-    })
+	app := fiber.New()
 
-    app.Listen(":3000")
+	xRoutes(app)
+ // Register routes
+    app.Get("/", initialize)
+	app.Listen(":3000")
+
+
+
 }
+
+func initialize(c *fiber.Ctx) error {
+    return c.SendString("Hello, World!")
+}
+
