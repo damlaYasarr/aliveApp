@@ -6,6 +6,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"net/http"
     "gorm.io/gorm"
+    "errors"
 	
 )
 
@@ -13,45 +14,64 @@ import (
 func ListUsersAim(c *fiber.Ctx) error {
 	facts := []models.User{}
 	database.DB.Db.Find(&facts)
-
+ //ana ekranda aynı userin bilgileri time bilgisi ile yayınlanacak
 	return c.Status(200).JSON(facts)
 }
 
-//Add new user
-func AddnewAim(c *fiber.Ctx) error {
-
+func AddNewAim(c *fiber.Ctx) error {
+    // Parse request body
     var requestBody struct {
-        UserID    int64      `json:"user_id"`
-        Aim       string    `json:"aim"`
-        AimDate   string `json:"aim_date"`
-		Endday    string `json:"endday"`
-		Notification string`json:"notif"`
+        Email          string `json:"email"`
+        Aim            string `json:"aim"`
+        AimDate        string `json:"aim_date"`
+        Endday         string `json:"endday"`
+        Notification   string `json:"notif"`
     }
     if err := c.BodyParser(&requestBody); err != nil {
         return c.Status(http.StatusBadRequest).SendString("Invalid request body")
     }
 
+    // Get the user ID from the email
+    userID, err := GetUserIDByEmail(requestBody.Email)
+    if err != nil {
+        return c.Status(http.StatusInternalServerError).SendString("Failed to get user ID")
+    }
+
     // Check if the user exists
     var user models.User
-    if err := database.DB.Db.First(&user, requestBody.UserID).Error; err != nil {
+    if err := database.DB.Db.First(&user, userID).Error; err != nil {
         return c.Status(http.StatusNotFound).SendString("User not found")
     }
 
     // Create a new aim object
     newAim := models.Aim{
-        USERID:   requestBody.UserID,
-        Name:      requestBody.Aim,
-        Startday:  requestBody.AimDate,
-        Endday: requestBody.Endday,
-        NotificationHour: requestBody.Notification,
+        USERID:           int64(userID),
+        Name:              requestBody.Aim,
+        Startday:          requestBody.AimDate,
+        Endday:            requestBody.Endday,
+        NotificationHour:  requestBody.Notification,
     }
 
     // Insert the new aim into the database
     if err := database.DB.Db.Create(&newAim).Error; err != nil {
         return c.Status(http.StatusInternalServerError).SendString("Failed to add new aim")
     }
+
     return c.Status(http.StatusOK).JSON(newAim)
 }
+// GetUserIDByEmail, e-posta adresine göre kullanıcı kimliğini alır
+func GetUserIDByEmails(email string) (uint, error) {
+    var user models.User
+    if err := database.DB.Db.Where("email = ?", email).First(&user).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            return 0, errors.New("User not found")
+        }
+        return 0, err
+    }
+    return uint(user.ID), nil
+}
+
+
 // ListUsersAllAim lists all aims for a specific user
 func ListUsersAllAim(c *fiber.Ctx) error {
     // Parse request body to get user ID

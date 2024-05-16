@@ -8,9 +8,9 @@ import (
 func xRoutes(app *fiber.App) {
 	app.Get("/listallAims", handlers.ListUsersAim)
 
-	app.Post("/postemail", handlers.RegisterAppWithEmail)
+	app.Post("/postemail", handlers.RegisterUser)
 
-	app.Post("/addnewaim", handlers.AddnewAim)
+	app.Post("/addnewaim", handlers.AddNewAim)
 
 	app.Get("/getall", handlers.ListUsersAllAim)
 	
