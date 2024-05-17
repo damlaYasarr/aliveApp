@@ -12,12 +12,61 @@ import (
 
 
 func ListUsersAim(c *fiber.Ctx) error {
-	facts := []models.User{}
-	database.DB.Db.Find(&facts)
- //ana ekranda aynı userin bilgileri time bilgisi ile yayınlanacak
-	return c.Status(200).JSON(facts)
-}
+    email := c.Query("email")
+    if email == "" {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
+    }
 
+    userID, err := GetUserIDByEmail(email)
+    if err != nil {
+        return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
+    }
+
+    // Kullanıcı ID'si ile ilişkili tüm aim ve zaman bilgilerini al
+    var aims []struct {
+        Name string `json:"name"`
+        COMPLETE_DAYS string `json:"complete_days"`
+        Startday string `json:"startday"`
+        Endday string `json:"endday"`
+        NotificationHour string `json:"notificationhour` 
+    }
+    if err := database.DB.Db.Raw(`
+        SELECT a.name, t.complete_days, a.startday, a.endday, a.notification_hour
+        FROM aims a
+        JOIN times t ON a.id = t.aim_id
+        WHERE a.user_id = ? `, userID).Scan(&aims).Error; err != nil {
+        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+    }
+
+    return c.Status(fiber.StatusOK).JSON(aims)
+}
+// donotduplicate aim name 
+func Donotduplicatename(c *fiber.Ctx) error {
+    type Request struct {
+        AimName string `json:"aimname"`
+        UserID  uint   `json:"userid"`
+    }
+    
+    var req Request
+    if err := c.BodyParser(&req); err != nil {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
+    }
+
+    // Aim adını ve kullanıcı ID'sini kontrol et
+    _, err := GetAIMIDByNAME(req.AimName, req.UserID)
+    if err == nil {
+        // Aim mevcutsa, hata döndür
+        return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "aim name already exists for this user"})
+    } else if !errors.Is(err, gorm.ErrRecordNotFound) {
+        // Başka bir hata oluşmuşsa, hatayı döndür
+        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+    }
+
+    // Aim mevcut değilse, işlemi devam ettir (örneğin, yeni bir aim oluşturabilirsiniz)
+    // Yeni aim oluşturma işlemi burada yapılabilir
+
+    return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "aim name is available"})
+}
 func AddNewAim(c *fiber.Ctx) error {
     // Parse request body
     var requestBody struct {
@@ -51,13 +100,26 @@ func AddNewAim(c *fiber.Ctx) error {
         Endday:            requestBody.Endday,
         NotificationHour:  requestBody.Notification,
     }
-
+    
     // Insert the new aim into the database
     if err := database.DB.Db.Create(&newAim).Error; err != nil {
         return c.Status(http.StatusInternalServerError).SendString("Failed to add new aim")
     }
 
-    return c.Status(http.StatusOK).JSON(newAim)
+    //create new aim id in the time table
+    aimid, err :=GetAIMIDByNAME(requestBody.Aim,userID)
+    if err != nil {
+        return c.Status(http.StatusInternalServerError).SendString("Failed to get aim ID")
+    }
+// Create a new Aim record and assign the user ID
+    newaimid := models.Time{
+        AIM_ID: int64(aimid),
+    }
+    if err := database.DB.Db.Create(&newaimid).Error; err != nil {
+        return c.Status(http.StatusInternalServerError).SendString("Failed to create aim_id in time table record")
+    }
+
+        return c.Status(http.StatusOK).JSON(newAim)
 }
 // GetUserIDByEmail, e-posta adresine göre kullanıcı kimliğini alır
 func GetUserIDByEmails(email string) (uint, error) {
@@ -71,42 +133,47 @@ func GetUserIDByEmails(email string) (uint, error) {
     return uint(user.ID), nil
 }
 
-
-// ListUsersAllAim lists all aims for a specific user
-func ListUsersAllAim(c *fiber.Ctx) error {
-    // Parse request body to get user ID
-    var requestBody struct {
-        UserID int64 `json:"user_id"`
+// GetUserIDByEmail, e-posta adresine göre kullanıcı kimliğini alır
+func GetAIMIDByNAME(aimname string, userid uint) (uint, error) {
+    var aim models.Aim
+    if err := database.DB.Db.Where("name = ? AND user_id = ?", aimname, userid).First(&aim).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            return 0, errors.New("aim not found")
+        }
+        return 0, err
     }
-    if err := c.BodyParser(&requestBody); err != nil {
-        return c.Status(http.StatusBadRequest).SendString("Invalid request body")
-    }
-
-    // Check if the user exists
-    var user models.User
-    if err := database.DB.Db.First(&user, requestBody.UserID).Error; err != nil {
-        return c.Status(http.StatusNotFound).SendString("User not found")
-    }
-
-    // Retrieve all aims for the user
-    var aims []models.Aim
-    if err := database.DB.Db.Where("user_id = ?", requestBody.UserID).Find(&aims).Error; err != nil {
-        return c.Status(http.StatusInternalServerError).SendString("Failed to retrieve aims")
-    }
-
-    // Return the list of aims
-    return c.Status(http.StatusOK).JSON(aims)
+    return uint(aim.ID), nil
 }
 
-// get habit by name
-func GetHabitByName(db *gorm.DB, name string) (*models.Aim, error) {
-    var habit models.Aim
-    if err := db.Where("name = ?", name).First(&habit).Error; err != nil {
-        return nil, err
+func GETActivedays(c *fiber.Ctx)error{
+    email := c.Query("email")
+    if email == "" {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
     }
 
-    return &habit, nil
+    userID, err := GetUserIDByEmail(email)
+    if err != nil {
+        return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
+    }
+
+    // Kullanıcı ID'si ile ilişkili tüm aim ve zaman bilgilerini al
+    var aims []struct {
+        ID int64 `json:"id"`
+        COMPLETE_DAYS string `json:"complete_days"`
+       
+    }
+    if err := database.DB.Db.Raw(`
+        SELECT a.id, t.complete_days 
+        FROM aims a
+        JOIN times t ON a.id = t.aim_id
+        WHERE a.user_id = ? `, userID).Scan(&aims).Error; err != nil {
+        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+    }
+
+    return c.Status(fiber.StatusOK).JSON(aims)
+
 }
+
 //delete habit its name
 func DeleteHabitByName(c *fiber.Ctx) error {
     // Parse the request body

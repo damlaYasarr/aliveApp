@@ -12,8 +12,12 @@ func xRoutes(app *fiber.App) {
 
 	app.Post("/addnewaim", handlers.AddNewAim)
 
-	app.Get("/getall", handlers.ListUsersAllAim)
+	//here is control function
+    app.Get("/donotduplicatename", handlers.Donotduplicatename)
 	
+   app.Get("/activedays", handlers.GETActivedays)
+
+
 	//app.Put("/edithabit",  handlers.EditHabitName)
 	app.Delete("/deletehabit/:name", handlers.DeleteHabitByName)
 
