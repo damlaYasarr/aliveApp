@@ -7,6 +7,8 @@ import (
 	"net/http"
     "gorm.io/gorm"
     "errors"
+    "strings"
+
 	
 )
 
@@ -22,14 +24,17 @@ func ListUsersAim(c *fiber.Ctx) error {
         return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
     }
 
-    // Kullanıcı ID'si ile ilişkili tüm aim ve zaman bilgilerini al
-    var aims []struct {
-        Name string `json:"name"`
-        COMPLETE_DAYS string `json:"complete_days"`
-        Startday string `json:"startday"`
-        Endday string `json:"endday"`
-        NotificationHour string `json:"notificationhour` 
+    type Aim struct {
+        Name             string   `json:"name"`
+        COMPLETE_DAYS    string   `json:"complete_days"`
+        Startday         string   `json:"startday"`
+        Endday           string   `json:"endday"`
+        NotificationHour string   `json:"notificationhour"`
+        CompleteDaysCount int      `json:"complete_days_count"`
     }
+    
+    // Fetch aims and time information associated with a user ID
+    var aims []Aim
     if err := database.DB.Db.Raw(`
         SELECT a.name, t.complete_days, a.startday, a.endday, a.notification_hour
         FROM aims a
@@ -37,10 +42,20 @@ func ListUsersAim(c *fiber.Ctx) error {
         WHERE a.user_id = ? `, userID).Scan(&aims).Error; err != nil {
         return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
     }
-
+    
+    // Calculate the count of complete days for each aim
+    for i := range aims {
+        // Extract complete days from the string
+        completeDaysStr := aims[i].COMPLETE_DAYS
+        // Remove curly braces and split the string by commas
+        dates := strings.Split(strings.Trim(completeDaysStr, "{}"), ",")
+        // Count the number of dates
+        aims[i].CompleteDaysCount = len(dates)
+    }
+    
     return c.Status(fiber.StatusOK).JSON(aims)
 }
-// donotduplicate aim name 
+// donotduplicate aim name --USE IT 
 func Donotduplicatename(c *fiber.Ctx) error {
     type Request struct {
         AimName string `json:"aimname"`
@@ -145,33 +160,33 @@ func GetAIMIDByNAME(aimname string, userid uint) (uint, error) {
     return uint(aim.ID), nil
 }
 
-func GETActivedays(c *fiber.Ctx)error{
-    email := c.Query("email")
-    if email == "" {
-        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
-    }
+func GETActivedays(c *fiber.Ctx) error {
+	email := c.Query("email")
+	if email == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
+	}
 
-    userID, err := GetUserIDByEmail(email)
-    if err != nil {
-        return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
-    }
+	userID, err := GetUserIDByEmail(email)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
+	}
 
-    // Kullanıcı ID'si ile ilişkili tüm aim ve zaman bilgilerini al
-    var aims []struct {
-        ID int64 `json:"id"`
-        COMPLETE_DAYS string `json:"complete_days"`
-       
-    }
-    if err := database.DB.Db.Raw(`
+	// Kullanıcı ID'si ile ilişkili tüm aim ve zaman bilgilerini al
+	var aims []struct {
+		ID            int64    `json:"id"`
+		COMPLETE_DAYS string `json:"complete_days"`
+	}
+	if err := database.DB.Db.Raw(`
         SELECT a.id, t.complete_days 
         FROM aims a
         JOIN times t ON a.id = t.aim_id
         WHERE a.user_id = ? `, userID).Scan(&aims).Error; err != nil {
-        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
-    }
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+	}
 
-    return c.Status(fiber.StatusOK).JSON(aims)
+  
 
+	return c.Status(fiber.StatusOK).JSON(aims)
 }
 
 //delete habit its name
@@ -223,11 +238,8 @@ func EditHabitName(db *gorm.DB, currentName string, newName string) error {
 }
 
 
-
-//arrange calendar
-//arrange user as a premium
 //get the all resuult
-
+//getuser as a premium  payment microvervice
 
 
 //conversation with premium part
