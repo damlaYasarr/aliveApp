@@ -8,7 +8,7 @@ import (
     "gorm.io/gorm"
     "errors"
     "strings"
-
+    "time"
 	
 )
 
@@ -188,7 +188,58 @@ func GETActivedays(c *fiber.Ctx) error {
 
 	return c.Status(fiber.StatusOK).JSON(aims)
 }
+// ListUsersActiveAim, belirtilen e-posta adresine sahip kullanıcının aktif hedeflerini listeler
+func ListUsersActiveAim(c *fiber.Ctx) error {
+    email := c.Query("email")
+    if email == "" {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
+    }
 
+    userID, err := GetUserIDByEmail(email)
+    if err != nil {
+        return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
+    }
+
+    type Aim struct {
+        Name             string `json:"name"`
+        Startday         string `json:"startday"`
+        Endday           string `json:"endday"`
+        NotificationHour string `json:"notificationhour"`
+    }
+
+    var aims []Aim
+    if err := database.DB.Db.Raw(`
+        SELECT a.name, a.startday, a.endday, a.notification_hour
+        FROM aims a
+        WHERE a.user_id = ?`, userID).Scan(&aims).Error; err != nil {
+        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch user aims"})
+    }
+print(aims)
+    // AimActive fonksiyonunu kullanarak aktif olan hedefleri filtrele
+    var activeAims []Aim
+    for _, aim := range aims {
+        if IsAimActive(aim.Startday, aim.Endday) {
+            activeAims = append(activeAims, aim)
+        }
+    }
+
+    return c.Status(fiber.StatusOK).JSON(activeAims)
+}
+
+func IsAimActive(startday, endday string) bool {
+
+    now := time.Now()
+    startTime, err := time.Parse("2006-01-02", startday)
+    if err != nil {
+       
+        return false
+    }
+    endTime, err := time.Parse("2006-01-02", endday)
+    if err != nil {
+        return false
+    }
+    return now.After(startTime) && now.Before(endTime)
+}
 //delete habit its name
 func DeleteHabitByName(c *fiber.Ctx) error {
     // Parse the request body
