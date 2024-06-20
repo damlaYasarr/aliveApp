@@ -9,10 +9,17 @@ import (
     "errors"
     "strings"
     "time"
+    "context"
+	"fmt"
+    "github.com/lib/pq"
+
+	"github.com/robfig/cron/v3"
+
+	"firebase.google.com/go/messaging"
 	
 )
 
-
+//I dont use it
 func ListUsersAim(c *fiber.Ctx) error {
     email := c.Query("email")
     if email == "" {
@@ -51,9 +58,17 @@ func ListUsersAim(c *fiber.Ctx) error {
         dates := strings.Split(strings.Trim(completeDaysStr, "{}"), ",")
         // Count the number of dates
         aims[i].CompleteDaysCount = len(dates)
+
+        
     }
-    
-    return c.Status(fiber.StatusOK).JSON(aims)
+     // Filter active aims
+     var activeAims []Aim
+     for _, aim := range aims {
+         if IsAimActive(aim.Startday, aim.Endday) {
+             activeAims = append(activeAims, aim)
+         }
+     }
+    return c.Status(fiber.StatusOK).JSON(activeAims)
 }
 // donotduplicate aim name --USE IT 
 func Donotduplicatename(c *fiber.Ctx) error {
@@ -67,74 +82,73 @@ func Donotduplicatename(c *fiber.Ctx) error {
         return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
     }
 
-    // Aim adını ve kullanıcı ID'sini kontrol et
     _, err := GetAIMIDByNAME(req.AimName, req.UserID)
     if err == nil {
-        // Aim mevcutsa, hata döndür
+    
         return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "aim name already exists for this user"})
     } else if !errors.Is(err, gorm.ErrRecordNotFound) {
-        // Başka bir hata oluşmuşsa, hatayı döndür
+     
         return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
     }
 
-    // Aim mevcut değilse, işlemi devam ettir (örneğin, yeni bir aim oluşturabilirsiniz)
-    // Yeni aim oluşturma işlemi burada yapılabilir
-
     return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "aim name is available"})
 }
+
+// AddNewAim handles adding a new aim and scheduling a notification
 func AddNewAim(c *fiber.Ctx) error {
-    // Parse request body
-    var requestBody struct {
-        Email          string `json:"email"`
-        Aim            string `json:"aim"`
-        AimDate        string `json:"aim_date"`
-        Endday         string `json:"endday"`
-        Notification   string `json:"notif"`
-    }
-    if err := c.BodyParser(&requestBody); err != nil {
-        return c.Status(http.StatusBadRequest).SendString("Invalid request body")
-    }
+	// Parse request body
+	var requestBody struct {
+		Email        string `json:"email"`
+		Aim          string `json:"name"`
+		AimDate      string `json:"startday"`
+		Endday       string `json:"endday"`
+		Notification string `json:"notification_hour"`
+	}
+	if err := c.BodyParser(&requestBody); err != nil {
+		return c.Status(http.StatusBadRequest).SendString("Invalid request body")
+	}
 
-    // Get the user ID from the email
-    userID, err := GetUserIDByEmail(requestBody.Email)
-    if err != nil {
-        return c.Status(http.StatusInternalServerError).SendString("Failed to get user ID")
-    }
+	// Get the user ID from the email
+	userID, err := GetUserIDByEmail(requestBody.Email)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).SendString("Failed to get user ID")
+	}
 
-    // Check if the user exists
-    var user models.User
-    if err := database.DB.Db.First(&user, userID).Error; err != nil {
-        return c.Status(http.StatusNotFound).SendString("User not found")
-    }
+	// Check if the user exists
+	var user models.User
+	if err := database.DB.Db.First(&user, userID).Error; err != nil {
+		return c.Status(http.StatusNotFound).SendString("User not found")
+	}
 
-    // Create a new aim object
-    newAim := models.Aim{
-        USERID:           int64(userID),
-        Name:              requestBody.Aim,
-        Startday:          requestBody.AimDate,
-        Endday:            requestBody.Endday,
-        NotificationHour:  requestBody.Notification,
-    }
-    
-    // Insert the new aim into the database
-    if err := database.DB.Db.Create(&newAim).Error; err != nil {
-        return c.Status(http.StatusInternalServerError).SendString("Failed to add new aim")
-    }
 
-    //create new aim id in the time table
-    aimid, err :=GetAIMIDByNAME(requestBody.Aim,userID)
-    if err != nil {
-        return c.Status(http.StatusInternalServerError).SendString("Failed to get aim ID")
-    }
-// Create a new Aim record and assign the user ID
-    newaimid := models.Time{
-        AIM_ID: int64(aimid),
-    }
-    if err := database.DB.Db.Create(&newaimid).Error; err != nil {
-        return c.Status(http.StatusInternalServerError).SendString("Failed to create aim_id in time table record")
-    }
+	newAim := models.Aim{
+		USERID:           int64(userID),
+		Name:             requestBody.Aim,
+		Startday:         requestBody.AimDate,
+		Endday:           requestBody.Endday,
+		NotificationHour: requestBody.Notification,
+	}
 
-        return c.Status(http.StatusOK).JSON(newAim)
+	// Insert the new aim into the database
+	if err := database.DB.Db.Create(&newAim).Error; err != nil {
+		return c.Status(http.StatusInternalServerError).SendString("Failed to add new aim")
+	}
+
+	// Create a new aim ID in the time table
+	aimid, err := GetAIMIDByNAME(requestBody.Aim, userID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).SendString("Failed to get aim ID")
+	}
+	newaimid := models.Time{
+		AIM_ID: int64(aimid),
+	}
+	if err := database.DB.Db.Create(&newaimid).Error; err != nil {
+		return c.Status(http.StatusInternalServerError).SendString("Failed to create aim_id in time table record")
+	}
+
+	
+
+	return c.Status(http.StatusOK).JSON(newAim)
 }
 // GetUserIDByEmail, e-posta adresine göre kullanıcı kimliğini alır
 func GetUserIDByEmails(email string) (uint, error) {
@@ -201,21 +215,22 @@ func ListUsersActiveAim(c *fiber.Ctx) error {
     }
 
     type Aim struct {
+        ID               int64  `json:"id"`
         Name             string `json:"name"`
         Startday         string `json:"startday"`
         Endday           string `json:"endday"`
-        NotificationHour string `json:"notificationhour"`
+        NotificationHour string `json:"notification_hour"`
     }
 
     var aims []Aim
     if err := database.DB.Db.Raw(`
-        SELECT a.name, a.startday, a.endday, a.notification_hour
+        SELECT a.id, a.name, a.startday, a.endday, a.notification_hour
         FROM aims a
         WHERE a.user_id = ?`, userID).Scan(&aims).Error; err != nil {
         return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch user aims"})
     }
-print(aims)
-    // AimActive fonksiyonunu kullanarak aktif olan hedefleri filtrele
+    
+    // Filter active aims
     var activeAims []Aim
     for _, aim := range aims {
         if IsAimActive(aim.Startday, aim.Endday) {
@@ -223,74 +238,309 @@ print(aims)
         }
     }
 
+   
+    
+
     return c.Status(fiber.StatusOK).JSON(activeAims)
 }
 
-func IsAimActive(startday, endday string) bool {
+// Initialize Firebase client and cron scheduler
+var firebaseClient *messaging.Client
+var myCron = cron.New()
 
-    now := time.Now()
-    startTime, err := time.Parse("2006-01-02", startday)
-    if err != nil {
-       
-        return false
-    }
-    endTime, err := time.Parse("2006-01-02", endday)
-    if err != nil {
-        return false
-    }
-    return now.After(startTime) && now.Before(endTime)
+// Schedule a daily notification
+func ScheduleDailyNotification(client *messaging.Client, token, title, body, notificationTime string) error {
+	// Parse the notification time
+	t, err := time.Parse("3:04 PM", notificationTime)
+	if err != nil {
+		return fmt.Errorf("error parsing notification time: %v", err)
+	}
+
+	// Create the cron expression for daily notifications at the specified time
+	cronExpr := fmt.Sprintf("%d %d * * *", t.Minute(), t.Hour())
+
+	// Schedule the cron job
+	_, err = myCron.AddFunc(cronExpr, func() {
+		sendNotification(client, token, title, body)
+	})
+	if err != nil {
+		return fmt.Errorf("error scheduling notification: %v", err)
+	}
+
+	// Start the cron scheduler
+	myCron.Start()
+	return nil
 }
-//delete habit its name
-func DeleteHabitByName(c *fiber.Ctx) error {
-    // Parse the request body
-    var requestBody struct {
-        Name string `json:"name"`
+
+// IsAimActiveAtCurrentTime checks if the current time is within the specified aim's active period and matches the notification hour.
+func IsAimActiveAtCurrentTime(startday, endday, notificationHour string) bool {
+	// Set the local time zone to Europe/Istanbul (UTC+3)
+	loc, err := time.LoadLocation("Europe/Istanbul")
+	if err != nil {
+		fmt.Println("Error loading location:", err)
+		// If location loading fails, default to UTC
+		loc = time.UTC
+	}
+
+	now := time.Now().In(loc) // Get the current time in Istanbul timezone
+
+	// Parse the start day
+	startTime, err := time.ParseInLocation("02.01.2006", startday, loc)
+	if err != nil {
+		fmt.Println("Error parsing start day:", err)
+		return false
+	}
+
+	// Parse the end day
+	endTime, err := time.ParseInLocation("02.01.2006", endday, loc)
+	if err != nil {
+		fmt.Println("Error parsing end day:", err)
+		return false
+	}
+
+	// Check if the current date is within the specified range
+	if now.Before(startTime) || now.After(endTime) {
+		return false
+	}
+
+	// Parse the notification hour
+	notificationTime, err := time.ParseInLocation("3:04 PM", notificationHour, loc)
+	if err != nil {
+		fmt.Println("Error parsing notification hour:", err)
+		return false
+	}
+
+	// Debugging: Print parsed and current times
+	fmt.Printf("Current time: %02d:%02d %s\n", now.Hour(), now.Minute(), now.Format("PM"))
+	fmt.Printf("Notification time: %02d:%02d %s\n", notificationTime.Hour(), notificationTime.Minute(), notificationTime.Format("PM"))
+
+	// Check if the current time matches the notification hour and minute, considering AM/PM
+	return now.Hour() == notificationTime.Hour() && now.Minute() == notificationTime.Minute() && now.Format("PM") == notificationTime.Format("PM")
+}
+// Send a notification to a specific device token
+func sendNotification(client *messaging.Client, token, title, body string) error {
+	message := &messaging.Message{
+		Notification: &messaging.Notification{
+			Title: title,
+			Body:  body,
+		},
+		Token: token,
+	}
+
+	response, err := client.Send(context.Background(), message)
+	if err != nil {
+		return fmt.Errorf("error sending message: %v", err)
+	}
+
+	fmt.Printf("Message successfully sent: %v\n", response)
+	return nil
+}
+
+
+// Check if an aim is active
+func IsAimActive(startday string, endday string) bool {
+	now := time.Now()
+
+	startTime, err := time.Parse("02.01.2006", startday)
+	if err != nil {
+		return false
+	}
+	endTime, err := time.Parse("02.01.2006", endday)
+	if err != nil {
+		return false
+	}
+
+	return now.After(startTime) && now.Before(endTime)
+}
+type Aim struct {
+    ID               int64  `json:"id"`
+    Name             string `json:"name"`
+    Startday         string `json:"startday"`
+    Endday           string `json:"endday"`
+    NotificationHour string `json:"notification_hour"`
+}
+
+func ListActiveHabits(email string) ([]Aim, error) {
+    // Get user ID by email
+    userID, err := GetUserIDByEmail(email)
+    if err != nil {
+        // Handle user not found error
+        return nil, fiber.NewError(fiber.StatusNotFound, "user not found")
     }
+
+    // Query active aims from database
+    var aims []Aim
+    if err := database.DB.Db.Raw(`
+        SELECT id, name, startday, endday, notification_hour
+        FROM aims
+        WHERE user_id = ?`, userID).Scan(&aims).Error; err != nil {
+        // Handle database query error
+        return nil, fiber.NewError(fiber.StatusInternalServerError, "failed to fetch user aims")
+    }
+
+    // Filter active aims
+    var activeAims []Aim
+    for _, aim := range aims {
+        if IsAimActive(aim.Startday, aim.Endday) {
+            activeAims = append(activeAims, aim)
+        }
+    }
+
+    // Return active aims
+    return activeAims, nil
+}
+
+
+// ApprovalHabitDate handles the request to update the habit date
+func ApprovalHabitDate(c *fiber.Ctx) error {
+    // Define the structure of the request body
+    var requestBody struct {
+        Email   string `json:"email"`
+        Aim     string `json:"name"`
+        AimDate string `json:"complete_days"`
+    }
+
+    // Parse the request body
     if err := c.BodyParser(&requestBody); err != nil {
         return c.Status(fiber.StatusBadRequest).SendString("Invalid request body")
     }
 
-    // Retrieve the habit name from the request body
-    name := requestBody.Name
-
-    // Retrieve the database instance from Fiber context
-    db := c.Locals("db").(*gorm.DB)
-
-    // Find the habit by its name
-    var habit models.Aim
-    if err := db.Where("name = ?", name).First(&habit).Error; err != nil {
-        return c.Status(fiber.StatusNotFound).SendString("Habit not found")
+    // Retrieve aim_id using the provided Aim and Email
+    aimID, err := GetHabitIdByName(requestBody.Aim, requestBody.Email)
+    if err != nil {
+        return c.Status(fiber.StatusInternalServerError).SendString("Failed to retrieve aim_id: " + err.Error())
     }
 
-    // Delete the habit
-    if err := db.Delete(&habit).Error; err != nil {
-        return c.Status(fiber.StatusInternalServerError).SendString("Failed to delete habit")
+    // Retrieve the existing time record
+    var existingTime models.Time
+    if err := database.DB.Db.Where("aim_id = ?", aimID).First(&existingTime).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            // If the record doesn't exist, create a new one
+            newTime := models.Time{
+                AIM_ID:        aimID,
+                COMPLETE_DAYS: []string{requestBody.AimDate}, // Initialize with new date
+            }
+            if err := database.DB.Db.Create(&newTime).Error; err != nil {
+                return c.Status(fiber.StatusInternalServerError).SendString("Failed to create new time table record")
+            }
+            return c.Status(fiber.StatusOK).SendString("Time table record created successfully")
+        }
+        return c.Status(fiber.StatusInternalServerError).SendString("Failed to retrieve time record")
     }
 
-    return c.SendString("Habit deleted successfully")
+    // Initialize COMPLETE_DAYS if it's nil to avoid nil pointer dereference
+    if existingTime.COMPLETE_DAYS == nil {
+        existingTime.COMPLETE_DAYS = make([]string, 0)
+    }
+
+    // Check if AimDate already exists in COMPLETE_DAYS array
+    var dateExists bool
+    for _, day := range existingTime.COMPLETE_DAYS {
+        if day == requestBody.AimDate {
+            dateExists = true
+            break
+        }
+    }
+
+    // If AimDate doesn't exist in COMPLETE_DAYS array, append it
+    if !dateExists {
+        existingTime.COMPLETE_DAYS = append(existingTime.COMPLETE_DAYS, requestBody.AimDate)
+
+        // Convert the COMPLETE_DAYS slice to PostgreSQL array format
+        arrayData := pq.Array(existingTime.COMPLETE_DAYS)
+
+        // Construct the SQL query to update the COMPLETE_DAYS array
+        query := `
+            UPDATE times 
+            SET complete_days = $1 
+            WHERE aim_id = $2
+        `
+
+        // Execute the SQL query
+        if err := database.DB.Db.Exec(query, arrayData, aimID).Error; err != nil {
+            return c.Status(fiber.StatusInternalServerError).SendString("Failed to update time table record")
+        }
+    }
+
+    // Return success status
+    return c.Status(fiber.StatusOK).SendString("Time table record updated successfully")
 }
-// edit habit by name_ use gethabit name func here 
-func EditHabitName(db *gorm.DB, currentName string, newName string) error {
-    // Find the habit by its current name
-    var habit models.Aim
-    if err := db.Where("name = ?", currentName).First(&habit).Error; err != nil {
-        return err // Return error if habit with given current name is not found
+// get habit's id with email
+func GetHabitIdByName(name string, email string) (int64, error) {
+    // Retrieve user ID by email
+    userID, err := GetUserIDByEmail(email)
+    if err != nil {
+        return 0, err
     }
 
-    // Update the habit's name
-    habit.Name = newName
-
-    // Save the changes to the database
-    if err := db.Save(&habit).Error; err != nil {
-        return err // Return error if saving fails
+    // Find the habit (aim) by name and user ID
+    var aim models.Aim
+    if err := database.DB.Db.Where("name = ? AND user_id = ?", name, userID).First(&aim).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            return 0, errors.New("Habit not found")
+        }
+        return 0, err
     }
 
-    return nil // Return nil if editing is successful
+    // Return the habit's ID
+    fmt.Printf("Habit ID: %d\n", aim.ID)
+    return aim.ID, nil
+}
+// deleete user aim from aim table --> It works
+func DeleteUserAim(c *fiber.Ctx) error {
+    // Extract the email and aim name from query parameters
+    email := c.Query("email")
+    aimname := c.Query("name")
+
+    // Check if the email and aim name are provided
+    if email == "" {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
+    }
+    if aimname == "" {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "aim name is required"})
+    }
+
+    // Retrieve aim_id using the provided Aim name and Email
+    aim_id, err := GetHabitIdByName(aimname, email)
+    if err != nil {
+        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to retrieve aim_id: " + err.Error()})
+    }
+  
+    // Get the user ID by email
+    userID, err := GetUserIDByEmail(email)
+    if err != nil {
+        return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
+    }
+
+    // Check if the aim exists and belongs to the user
+    var aimExists bool
+    if err := database.DB.Db.Raw(`
+        SELECT EXISTS(
+            SELECT 1
+            FROM aims
+            WHERE id = ? AND user_id = ?
+        )`, aim_id, userID).Scan(&aimExists).Error; err != nil {
+        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+    }
+
+    if !aimExists {
+        return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "aim not found or does not belong to user"})
+    }
+
+    // Delete the aim from the database
+    if err := database.DB.Db.Exec(`DELETE FROM aims WHERE id = ?`, aim_id).Error; err != nil {
+        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+    }
+
+    // Delete the times associated with the aim from the database
+    if err := database.DB.Db.Exec(`DELETE FROM times WHERE aim_id = ?`, aim_id).Error; err != nil {
+        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+    }
+
+    // Return a success message
+    return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "aim deleted successfully"})
 }
 
-
-//get the all resuult
-//getuser as a premium  payment microvervice
 
 
 //conversation with premium part
