@@ -10,6 +10,8 @@ import (
 )
 
 func xRoutes(app *fiber.App) {
+	// notification
+	app.Get("/send-notification", sendNotificationHandler)
     // approve the completed days
 	app.Put("/approvaltime", handlers.ApprovalHabitDate) 
 

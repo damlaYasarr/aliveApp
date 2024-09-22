@@ -1,97 +1,94 @@
 package handlers
 
 import (
+	"database/sql"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"firebase.google.com/go/db"
 	"github.com/damlaYasarr/aliveApp/database"
 	"github.com/damlaYasarr/aliveApp/models"
 	"github.com/gofiber/fiber/v2"
-	"net/http"
-    "gorm.io/gorm"
-    "errors"
-    "strings"
-    "time"
-    "context"
-	"fmt"
-    "github.com/lib/pq"
-
-	"github.com/robfig/cron/v3"
-
-	"firebase.google.com/go/messaging"
-	
+	"github.com/lib/pq"
+	"gorm.io/gorm"
 )
 
-//I dont use it
+// I dont use it
 func ListUsersAim(c *fiber.Ctx) error {
-    email := c.Query("email")
-    if email == "" {
-        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
-    }
+	email := c.Query("email")
+	if email == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
+	}
 
-    userID, err := GetUserIDByEmail(email)
-    if err != nil {
-        return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
-    }
+	userID, err := GetUserIDByEmail(email)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
+	}
 
-    type Aim struct {
-        Name             string   `json:"name"`
-        COMPLETE_DAYS    string   `json:"complete_days"`
-        Startday         string   `json:"startday"`
-        Endday           string   `json:"endday"`
-        NotificationHour string   `json:"notificationhour"`
-        CompleteDaysCount int      `json:"complete_days_count"`
-    }
-    
-    // Fetch aims and time information associated with a user ID
-    var aims []Aim
-    if err := database.DB.Db.Raw(`
+	type Aim struct {
+		Name              string `json:"name"`
+		COMPLETE_DAYS     string `json:"complete_days"`
+		Startday          string `json:"startday"`
+		Endday            string `json:"endday"`
+		NotificationHour  string `json:"notificationhour"`
+		CompleteDaysCount int    `json:"complete_days_count"`
+	}
+
+	// Fetch aims and time information associated with a user ID
+	var aims []Aim
+	if err := database.DB.Db.Raw(`
         SELECT a.name, t.complete_days, a.startday, a.endday, a.notification_hour
         FROM aims a
         JOIN times t ON a.id = t.aim_id
         WHERE a.user_id = ? `, userID).Scan(&aims).Error; err != nil {
-        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
-    }
-    
-    // Calculate the count of complete days for each aim
-    for i := range aims {
-        // Extract complete days from the string
-        completeDaysStr := aims[i].COMPLETE_DAYS
-        // Remove curly braces and split the string by commas
-        dates := strings.Split(strings.Trim(completeDaysStr, "{}"), ",")
-        // Count the number of dates
-        aims[i].CompleteDaysCount = len(dates)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+	}
 
-        
-    }
-     // Filter active aims
-     var activeAims []Aim
-     for _, aim := range aims {
-         if IsAimActive(aim.Startday, aim.Endday) {
-             activeAims = append(activeAims, aim)
-         }
-     }
-    return c.Status(fiber.StatusOK).JSON(activeAims)
+	// Calculate the count of complete days for each aim
+	for i := range aims {
+		// Extract complete days from the string
+		completeDaysStr := aims[i].COMPLETE_DAYS
+		// Remove curly braces and split the string by commas
+		dates := strings.Split(strings.Trim(completeDaysStr, "{}"), ",")
+		// Count the number of dates
+		aims[i].CompleteDaysCount = len(dates) - 1
+
+	}
+	// Filter active aims
+	var activeAims []Aim
+	for _, aim := range aims {
+		if IsAimActive(aim.Startday, aim.Endday) {
+			activeAims = append(activeAims, aim)
+		}
+	}
+	return c.Status(fiber.StatusOK).JSON(activeAims)
 }
-// donotduplicate aim name --USE IT 
+
+// donotduplicate aim name --USE IT
 func Donotduplicatename(c *fiber.Ctx) error {
-    type Request struct {
-        AimName string `json:"aimname"`
-        UserID  uint   `json:"userid"`
-    }
-    
-    var req Request
-    if err := c.BodyParser(&req); err != nil {
-        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
-    }
+	type Request struct {
+		AimName string `json:"aimname"`
+		UserID  uint   `json:"userid"`
+	}
 
-    _, err := GetAIMIDByNAME(req.AimName, req.UserID)
-    if err == nil {
-    
-        return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "aim name already exists for this user"})
-    } else if !errors.Is(err, gorm.ErrRecordNotFound) {
-     
-        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
-    }
+	var req Request
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
+	}
 
-    return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "aim name is available"})
+	_, err := GetAIMIDByNAME(req.AimName, req.UserID)
+	if err == nil {
+
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "aim name already exists for this user"})
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "aim name is available"})
 }
 
 // AddNewAim handles adding a new aim and scheduling a notification
@@ -120,7 +117,6 @@ func AddNewAim(c *fiber.Ctx) error {
 		return c.Status(http.StatusNotFound).SendString("User not found")
 	}
 
-
 	newAim := models.Aim{
 		USERID:           int64(userID),
 		Name:             requestBody.Aim,
@@ -146,32 +142,31 @@ func AddNewAim(c *fiber.Ctx) error {
 		return c.Status(http.StatusInternalServerError).SendString("Failed to create aim_id in time table record")
 	}
 
-	
-
 	return c.Status(http.StatusOK).JSON(newAim)
 }
+
 // GetUserIDByEmail, e-posta adresine göre kullanıcı kimliğini alır
 func GetUserIDByEmails(email string) (uint, error) {
-    var user models.User
-    if err := database.DB.Db.Where("email = ?", email).First(&user).Error; err != nil {
-        if errors.Is(err, gorm.ErrRecordNotFound) {
-            return 0, errors.New("User not found")
-        }
-        return 0, err
-    }
-    return uint(user.ID), nil
+	var user models.User
+	if err := database.DB.Db.Where("email = ?", email).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, errors.New("User not found")
+		}
+		return 0, err
+	}
+	return uint(user.ID), nil
 }
 
 // GetUserIDByEmail, e-posta adresine göre kullanıcı kimliğini alır
 func GetAIMIDByNAME(aimname string, userid uint) (uint, error) {
-    var aim models.Aim
-    if err := database.DB.Db.Where("name = ? AND user_id = ?", aimname, userid).First(&aim).Error; err != nil {
-        if errors.Is(err, gorm.ErrRecordNotFound) {
-            return 0, errors.New("aim not found")
-        }
-        return 0, err
-    }
-    return uint(aim.ID), nil
+	var aim models.Aim
+	if err := database.DB.Db.Where("name = ? AND user_id = ?", aimname, userid).First(&aim).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, errors.New("aim not found")
+		}
+		return 0, err
+	}
+	return uint(aim.ID), nil
 }
 
 func GETActivedays(c *fiber.Ctx) error {
@@ -187,7 +182,7 @@ func GETActivedays(c *fiber.Ctx) error {
 
 	// Kullanıcı ID'si ile ilişkili tüm aim ve zaman bilgilerini al
 	var aims []struct {
-		ID            int64    `json:"id"`
+		ID            int64  `json:"id"`
 		COMPLETE_DAYS string `json:"complete_days"`
 	}
 	if err := database.DB.Db.Raw(`
@@ -198,78 +193,46 @@ func GETActivedays(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
 	}
 
-  
-
 	return c.Status(fiber.StatusOK).JSON(aims)
 }
+
 // ListUsersActiveAim, belirtilen e-posta adresine sahip kullanıcının aktif hedeflerini listeler
 func ListUsersActiveAim(c *fiber.Ctx) error {
-    email := c.Query("email")
-    if email == "" {
-        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
-    }
+	email := c.Query("email")
+	if email == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
+	}
 
-    userID, err := GetUserIDByEmail(email)
-    if err != nil {
-        return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
-    }
+	userID, err := GetUserIDByEmail(email)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
+	}
 
-    type Aim struct {
-        ID               int64  `json:"id"`
-        Name             string `json:"name"`
-        Startday         string `json:"startday"`
-        Endday           string `json:"endday"`
-        NotificationHour string `json:"notification_hour"`
-    }
+	type Aim struct {
+		ID               int64  `json:"id"`
+		Name             string `json:"name"`
+		Startday         string `json:"startday"`
+		Endday           string `json:"endday"`
+		NotificationHour string `json:"notification_hour"`
+	}
 
-    var aims []Aim
-    if err := database.DB.Db.Raw(`
+	var aims []Aim
+	if err := database.DB.Db.Raw(`
         SELECT a.id, a.name, a.startday, a.endday, a.notification_hour
         FROM aims a
         WHERE a.user_id = ?`, userID).Scan(&aims).Error; err != nil {
-        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch user aims"})
-    }
-    
-    // Filter active aims
-    var activeAims []Aim
-    for _, aim := range aims {
-        if IsAimActive(aim.Startday, aim.Endday) {
-            activeAims = append(activeAims, aim)
-        }
-    }
-
-   
-    
-
-    return c.Status(fiber.StatusOK).JSON(activeAims)
-}
-
-// Initialize Firebase client and cron scheduler
-var firebaseClient *messaging.Client
-var myCron = cron.New()
-
-// Schedule a daily notification
-func ScheduleDailyNotification(client *messaging.Client, token, title, body, notificationTime string) error {
-	// Parse the notification time
-	t, err := time.Parse("3:04 PM", notificationTime)
-	if err != nil {
-		return fmt.Errorf("error parsing notification time: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch user aims"})
 	}
 
-	// Create the cron expression for daily notifications at the specified time
-	cronExpr := fmt.Sprintf("%d %d * * *", t.Minute(), t.Hour())
-
-	// Schedule the cron job
-	_, err = myCron.AddFunc(cronExpr, func() {
-		sendNotification(client, token, title, body)
-	})
-	if err != nil {
-		return fmt.Errorf("error scheduling notification: %v", err)
+	// Filter active aims
+	var activeAims []Aim
+	for _, aim := range aims {
+		if IsAimActive(aim.Startday, aim.Endday) {
+			activeAims = append(activeAims, aim)
+		}
 	}
 
-	// Start the cron scheduler
-	myCron.Start()
-	return nil
+	return c.Status(fiber.StatusOK).JSON(activeAims)
 }
 
 // IsAimActiveAtCurrentTime checks if the current time is within the specified aim's active period and matches the notification hour.
@@ -317,25 +280,6 @@ func IsAimActiveAtCurrentTime(startday, endday, notificationHour string) bool {
 	// Check if the current time matches the notification hour and minute, considering AM/PM
 	return now.Hour() == notificationTime.Hour() && now.Minute() == notificationTime.Minute() && now.Format("PM") == notificationTime.Format("PM")
 }
-// Send a notification to a specific device token
-func sendNotification(client *messaging.Client, token, title, body string) error {
-	message := &messaging.Message{
-		Notification: &messaging.Notification{
-			Title: title,
-			Body:  body,
-		},
-		Token: token,
-	}
-
-	response, err := client.Send(context.Background(), message)
-	if err != nil {
-		return fmt.Errorf("error sending message: %v", err)
-	}
-
-	fmt.Printf("Message successfully sent: %v\n", response)
-	return nil
-}
-
 
 // Check if an aim is active
 func IsAimActive(startday string, endday string) bool {
@@ -352,201 +296,264 @@ func IsAimActive(startday string, endday string) bool {
 
 	return now.After(startTime) && now.Before(endTime)
 }
+
 type Aim struct {
-    ID               int64  `json:"id"`
-    Name             string `json:"name"`
-    Startday         string `json:"startday"`
-    Endday           string `json:"endday"`
-    NotificationHour string `json:"notification_hour"`
+	ID               int64  `json:"id"`
+	Name             string `json:"name"`
+	Startday         string `json:"startday"`
+	Endday           string `json:"endday"`
+	NotificationHour string `json:"notification_hour"`
 }
 
 func ListActiveHabits(email string) ([]Aim, error) {
-    // Get user ID by email
-    userID, err := GetUserIDByEmail(email)
-    if err != nil {
-        // Handle user not found error
-        return nil, fiber.NewError(fiber.StatusNotFound, "user not found")
-    }
+	// Get user ID by email
+	userID, err := GetUserIDByEmail(email)
+	if err != nil {
+		// Handle user not found error
+		return nil, fiber.NewError(fiber.StatusNotFound, "user not found")
+	}
 
-    // Query active aims from database
-    var aims []Aim
-    if err := database.DB.Db.Raw(`
+	// Query active aims from database
+	var aims []Aim
+	if err := database.DB.Db.Raw(`
         SELECT id, name, startday, endday, notification_hour
         FROM aims
         WHERE user_id = ?`, userID).Scan(&aims).Error; err != nil {
-        // Handle database query error
-        return nil, fiber.NewError(fiber.StatusInternalServerError, "failed to fetch user aims")
-    }
+		// Handle database query error
+		return nil, fiber.NewError(fiber.StatusInternalServerError, "failed to fetch user aims")
+	}
 
-    // Filter active aims
-    var activeAims []Aim
-    for _, aim := range aims {
-        if IsAimActive(aim.Startday, aim.Endday) {
-            activeAims = append(activeAims, aim)
-        }
-    }
+	// Filter active aims
+	var activeAims []Aim
+	for _, aim := range aims {
+		if IsAimActive(aim.Startday, aim.Endday) {
+			activeAims = append(activeAims, aim)
+		}
+	}
 
-    // Return active aims
-    return activeAims, nil
+	// Return active aims
+	return activeAims, nil
 }
-
 
 // ApprovalHabitDate handles the request to update the habit date
 func ApprovalHabitDate(c *fiber.Ctx) error {
-    // Define the structure of the request body
-    var requestBody struct {
-        Email   string `json:"email"`
-        Aim     string `json:"name"`
-        AimDate string `json:"complete_days"`
-    }
 
-    // Parse the request body
-    if err := c.BodyParser(&requestBody); err != nil {
-        return c.Status(fiber.StatusBadRequest).SendString("Invalid request body")
-    }
+	var requestBody struct {
+		Email   string `json:"email"`
+		Aim     string `json:"name"`
+		AimDate string `json:"complete_days"`
+	}
 
-    // Retrieve aim_id using the provided Aim and Email
-    aimID, err := GetHabitIdByName(requestBody.Aim, requestBody.Email)
-    if err != nil {
-        return c.Status(fiber.StatusInternalServerError).SendString("Failed to retrieve aim_id: " + err.Error())
-    }
+	if err := c.BodyParser(&requestBody); err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString("Invalid request body")
+	}
 
-    // Retrieve the existing time record
-    var existingTime models.Time
-    if err := database.DB.Db.Where("aim_id = ?", aimID).First(&existingTime).Error; err != nil {
-        if errors.Is(err, gorm.ErrRecordNotFound) {
-            // If the record doesn't exist, create a new one
-            newTime := models.Time{
-                AIM_ID:        aimID,
-                COMPLETE_DAYS: []string{requestBody.AimDate}, // Initialize with new date
-            }
-            if err := database.DB.Db.Create(&newTime).Error; err != nil {
-                return c.Status(fiber.StatusInternalServerError).SendString("Failed to create new time table record")
-            }
-            return c.Status(fiber.StatusOK).SendString("Time table record created successfully")
-        }
-        return c.Status(fiber.StatusInternalServerError).SendString("Failed to retrieve time record")
-    }
+	aimID, err := GetHabitIdByName(requestBody.Aim, requestBody.Email)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to retrieve aim_id: " + err.Error())
+	}
 
-    // Initialize COMPLETE_DAYS if it's nil to avoid nil pointer dereference
-    if existingTime.COMPLETE_DAYS == nil {
-        existingTime.COMPLETE_DAYS = make([]string, 0)
-    }
+	var existingTime models.Time
+	if err := database.DB.Db.Where("aim_id = ?", aimID).First(&existingTime).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 
-    // Check if AimDate already exists in COMPLETE_DAYS array
-    var dateExists bool
-    for _, day := range existingTime.COMPLETE_DAYS {
-        if day == requestBody.AimDate {
-            dateExists = true
-            break
-        }
-    }
+			newTime := models.Time{
+				AIM_ID:        aimID,
+				COMPLETE_DAYS: []string{requestBody.AimDate},
+			}
+			if err := database.DB.Db.Create(&newTime).Error; err != nil {
+				return c.Status(fiber.StatusInternalServerError).SendString("Failed to create new time table record")
+			}
+			return c.Status(fiber.StatusOK).SendString("Time table record created successfully")
+		}
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to retrieve time record")
+	}
 
-    // If AimDate doesn't exist in COMPLETE_DAYS array, append it
-    if !dateExists {
-        existingTime.COMPLETE_DAYS = append(existingTime.COMPLETE_DAYS, requestBody.AimDate)
+	if existingTime.COMPLETE_DAYS == nil {
+		existingTime.COMPLETE_DAYS = make([]string, 0)
+	}
 
-        // Convert the COMPLETE_DAYS slice to PostgreSQL array format
-        arrayData := pq.Array(existingTime.COMPLETE_DAYS)
+	// Check if AimDate already exists in COMPLETE_DAYS array
+	var dateExists bool
+	for _, day := range existingTime.COMPLETE_DAYS {
+		if day == requestBody.AimDate {
+			dateExists = true
+			break
+		}
+	}
 
-        // Construct the SQL query to update the COMPLETE_DAYS array
-        query := `
+	if !dateExists {
+		existingTime.COMPLETE_DAYS = append(existingTime.COMPLETE_DAYS, requestBody.AimDate)
+
+		arrayData := pq.Array(existingTime.COMPLETE_DAYS)
+
+		query := `
             UPDATE times 
             SET complete_days = $1 
             WHERE aim_id = $2
         `
+		// Execute the SQL query
+		if err := database.DB.Db.Exec(query, arrayData, aimID).Error; err != nil {
+			return c.Status(fiber.StatusInternalServerError).SendString("Failed to update time table record")
+		}
+	}
 
-        // Execute the SQL query
-        if err := database.DB.Db.Exec(query, arrayData, aimID).Error; err != nil {
-            return c.Status(fiber.StatusInternalServerError).SendString("Failed to update time table record")
-        }
-    }
-
-    // Return success status
-    return c.Status(fiber.StatusOK).SendString("Time table record updated successfully")
+	// Return success status
+	return c.Status(fiber.StatusOK).SendString("Time table record updated successfully")
 }
+
 // get habit's id with email
 func GetHabitIdByName(name string, email string) (int64, error) {
-    // Retrieve user ID by email
-    userID, err := GetUserIDByEmail(email)
-    if err != nil {
-        return 0, err
-    }
+	// Retrieve user ID by email
+	userID, err := GetUserIDByEmail(email)
+	if err != nil {
+		return 0, err
+	}
 
-    // Find the habit (aim) by name and user ID
-    var aim models.Aim
-    if err := database.DB.Db.Where("name = ? AND user_id = ?", name, userID).First(&aim).Error; err != nil {
-        if errors.Is(err, gorm.ErrRecordNotFound) {
-            return 0, errors.New("Habit not found")
-        }
-        return 0, err
-    }
+	// Find the habit (aim) by name and user ID
+	var aim models.Aim
+	if err := database.DB.Db.Where("name = ? AND user_id = ?", name, userID).First(&aim).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, errors.New("Habit not found")
+		}
+		return 0, err
+	}
 
-    // Return the habit's ID
-    fmt.Printf("Habit ID: %d\n", aim.ID)
-    return aim.ID, nil
+	// Return the habit's ID
+	fmt.Printf("Habit ID: %d\n", aim.ID)
+	return aim.ID, nil
 }
+
 // deleete user aim from aim table --> It works
 func DeleteUserAim(c *fiber.Ctx) error {
-    // Extract the email and aim name from query parameters
-    email := c.Query("email")
-    aimname := c.Query("name")
+	// Extract the email and aim name from query parameters
+	email := c.Query("email")
+	aimname := c.Query("name")
 
-    // Check if the email and aim name are provided
-    if email == "" {
-        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
-    }
-    if aimname == "" {
-        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "aim name is required"})
-    }
+	// Check if the email and aim name are provided
+	if email == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
+	}
+	if aimname == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "aim name is required"})
+	}
 
-    // Retrieve aim_id using the provided Aim name and Email
-    aim_id, err := GetHabitIdByName(aimname, email)
-    if err != nil {
-        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to retrieve aim_id: " + err.Error()})
-    }
-  
-    // Get the user ID by email
-    userID, err := GetUserIDByEmail(email)
-    if err != nil {
-        return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
-    }
+	// Retrieve aim_id using the provided Aim name and Email
+	aim_id, err := GetHabitIdByName(aimname, email)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to retrieve aim_id: " + err.Error()})
+	}
 
-    // Check if the aim exists and belongs to the user
-    var aimExists bool
-    if err := database.DB.Db.Raw(`
+	// Get the user ID by email
+	userID, err := GetUserIDByEmail(email)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
+	}
+
+	// Check if the aim exists and belongs to the user
+	var aimExists bool
+	if err := database.DB.Db.Raw(`
         SELECT EXISTS(
             SELECT 1
             FROM aims
             WHERE id = ? AND user_id = ?
         )`, aim_id, userID).Scan(&aimExists).Error; err != nil {
-        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
-    }
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+	}
 
-    if !aimExists {
-        return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "aim not found or does not belong to user"})
-    }
+	if !aimExists {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "aim not found or does not belong to user"})
+	}
 
-    // Delete the aim from the database
-    if err := database.DB.Db.Exec(`DELETE FROM aims WHERE id = ?`, aim_id).Error; err != nil {
-        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
-    }
+	// Delete the aim from the database
+	if err := database.DB.Db.Exec(`DELETE FROM aims WHERE id = ?`, aim_id).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+	}
 
-    // Delete the times associated with the aim from the database
-    if err := database.DB.Db.Exec(`DELETE FROM times WHERE aim_id = ?`, aim_id).Error; err != nil {
-        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
-    }
+	// Delete the times associated with the aim from the database
+	if err := database.DB.Db.Exec(`DELETE FROM times WHERE aim_id = ?`, aim_id).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+	}
 
-    // Return a success message
-    return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "aim deleted successfully"})
+	// Return a success message
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "aim deleted successfully"})
 }
 
+func GetFeedBackByUsingAI(c *fiber.Ctx) error {
+	// Get the user's email from the query parameters
+	email := c.Query("email")
+	if email == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
+	}
 
+	// Retrieve user habits
+	feedback, err := listUserAllHabit(email, &sql.DB{})
+	if err != nil {
+		return err // Handle error from listUserAllHabit
+	}
 
-//conversation with premium part
-func PremiumUser(c *fiber.Ctx) error {
-	facts := []models.User{}
-	database.DB.Db.Find(&facts)
+	// Call the AI function with the feedback
+	res, err := ai.askanything("Can you analyze my schedule sequences in the certain area: " + feedback)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get AI feedback"})
+	}
 
-	return c.Status(200).JSON(facts)
+	// Return the AI response
+	return c.Status(fiber.StatusOK).JSON(res)
 }
+
+// listUserAllHabit retrieves the user's habits by their email.
+func listUserAllHabit(email string) ([]Aim, error) {
+	// Fetch the user ID by email
+	userID, err := GetUserIDByEmail(email)
+	if err != nil {
+		return nil, err // Return nil and the error
+	}
+	// Aim represents the structure for user habits.
+	type Aim struct {
+		Name              string `json:"name"`
+		CompleteDays      string `json:"complete_days"`
+		StartDay          string `json:"startday"`
+		EndDay            string `json:"endday"`
+		NotificationHour  string `json:"notification_hour"`
+		CompleteDaysCount int    `json:"complete_days_count"`
+	}
+	// Fetch aims and time information associated with a user ID
+	var aims []Aim
+	rows, err := db.Query(`
+		SELECT a.name, t.complete_days, a.startday, a.endday, a.notification_hour
+		FROM aims a
+		JOIN times t ON a.id = t.aim_id
+		WHERE a.user_id = ?`, userID)
+	if err != nil {
+		return nil, err // Return nil and the error
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var aim Aim
+		if err := rows.Scan(&aim.Name, &aim.CompleteDays, &aim.StartDay, &aim.EndDay, &aim.NotificationHour); err != nil {
+			return nil, err // Return nil and the error
+		}
+		aim.CompleteDaysCount = len(strings.Split(strings.Trim(aim.CompleteDays, "{}"), ",")) // Count dates directly
+		aims = append(aims, aim)
+	}
+
+	// Check for errors from iterating over rows
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Filter active aims
+	var activeAims []Aim
+	for _, aim := range aims {
+		if IsAimActive(aim.StartDay, aim.EndDay) {
+			activeAims = append(activeAims, aim)
+		}
+	}
+
+	return activeAims, nil
+}
+
+// GetUserIDByEmail should be defined to fetch the user ID based on the email.
+// IsAimActive should also be defined to check if an aim is active.
