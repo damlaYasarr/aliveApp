@@ -1,14 +1,12 @@
 package handlers
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
-	"firebase.google.com/go/db"
 	"github.com/damlaYasarr/aliveApp/database"
 	"github.com/damlaYasarr/aliveApp/models"
 	"github.com/gofiber/fiber/v2"
@@ -478,82 +476,3 @@ func DeleteUserAim(c *fiber.Ctx) error {
 	// Return a success message
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "aim deleted successfully"})
 }
-
-func GetFeedBackByUsingAI(c *fiber.Ctx) error {
-	// Get the user's email from the query parameters
-	email := c.Query("email")
-	if email == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
-	}
-
-	// Retrieve user habits
-	feedback, err := listUserAllHabit(email, &sql.DB{})
-	if err != nil {
-		return err // Handle error from listUserAllHabit
-	}
-
-	// Call the AI function with the feedback
-	res, err := ai.askanything("Can you analyze my schedule sequences in the certain area: " + feedback)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get AI feedback"})
-	}
-
-	// Return the AI response
-	return c.Status(fiber.StatusOK).JSON(res)
-}
-
-// listUserAllHabit retrieves the user's habits by their email.
-func listUserAllHabit(email string) ([]Aim, error) {
-	// Fetch the user ID by email
-	userID, err := GetUserIDByEmail(email)
-	if err != nil {
-		return nil, err // Return nil and the error
-	}
-	// Aim represents the structure for user habits.
-	type Aim struct {
-		Name              string `json:"name"`
-		CompleteDays      string `json:"complete_days"`
-		StartDay          string `json:"startday"`
-		EndDay            string `json:"endday"`
-		NotificationHour  string `json:"notification_hour"`
-		CompleteDaysCount int    `json:"complete_days_count"`
-	}
-	// Fetch aims and time information associated with a user ID
-	var aims []Aim
-	rows, err := db.Query(`
-		SELECT a.name, t.complete_days, a.startday, a.endday, a.notification_hour
-		FROM aims a
-		JOIN times t ON a.id = t.aim_id
-		WHERE a.user_id = ?`, userID)
-	if err != nil {
-		return nil, err // Return nil and the error
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var aim Aim
-		if err := rows.Scan(&aim.Name, &aim.CompleteDays, &aim.StartDay, &aim.EndDay, &aim.NotificationHour); err != nil {
-			return nil, err // Return nil and the error
-		}
-		aim.CompleteDaysCount = len(strings.Split(strings.Trim(aim.CompleteDays, "{}"), ",")) // Count dates directly
-		aims = append(aims, aim)
-	}
-
-	// Check for errors from iterating over rows
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	// Filter active aims
-	var activeAims []Aim
-	for _, aim := range aims {
-		if IsAimActive(aim.StartDay, aim.EndDay) {
-			activeAims = append(activeAims, aim)
-		}
-	}
-
-	return activeAims, nil
-}
-
-// GetUserIDByEmail should be defined to fetch the user ID based on the email.
-// IsAimActive should also be defined to check if an aim is active.
