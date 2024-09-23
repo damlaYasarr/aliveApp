@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -12,16 +13,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// Aimss represents the structure for user habits.
-type Aimss struct {
-	Name              string `json:"name"`
-	CompleteDays      string `json:"complete_days"`
-	StartDay          string `json:"startday"`
-	EndDay            string `json:"endday"`
-	NotificationHour  string `json:"notification_hour"`
-	CompleteDaysCount int    `json:"complete_days_count"`
-}
-
 // listUserAllHabit retrieves the user's habits by their email, using database.DB.Db as the connection.
 func listUserAllHabit(email string) (string, error) {
 	// Fetch the user ID by email
@@ -29,7 +20,15 @@ func listUserAllHabit(email string) (string, error) {
 	if err != nil {
 		return "", err // Return empty string and the error
 	}
-
+	// Aimss represents the structure for user habits.
+	type Aimss struct {
+		Name              string `json:"name"`
+		CompleteDays      string `json:"complete_days"`
+		StartDay          string `json:"startday"`
+		EndDay            string `json:"endday"`
+		NotificationHour  string `json:"notification_hour"`
+		CompleteDaysCount int    `json:"complete_days_count"`
+	}
 	// Fetch aims and time information associated with a user ID
 	var aims []Aimss
 	rows, err := database.DB.Db.Raw(`
@@ -72,14 +71,23 @@ type FeedbackResponse struct {
 
 // GetFeedBackByUsingAI calls the Python script and returns the AI feedback
 func GetFeedBackByUsingAI(feedback string) (string, error) {
-	// Prepare the Python command to execute
-	cmd := exec.Command("python3", "ai.py", feedback)
+	// Prepare the Python command with the feedback as an argument
+	cmd := exec.Command("/usr/src/app/venv/bin/python", "/usr/src/app/middleware/ai.py", feedback)
 
-	// Run the command and capture the output
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to execute AI script: %w", err)
+	// Create buffers to capture stdout and stderr
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	// Run the command and check for errors
+	if err := cmd.Run(); err != nil {
+		// If there's an error, log stderr for debugging
+		return "", fmt.Errorf("failed to execute AI script: %w: %s", err, stderr.String())
 	}
+
+	// Capture stdout (the actual output)
+	output := out.Bytes()
 
 	// Parse the JSON response from the Python script
 	var aiResponse FeedbackResponse
@@ -98,7 +106,8 @@ func ReturnFeedBack(c *fiber.Ctx) error {
 	}
 
 	// Get user habit data
-	feedback, err := listUserAllHabit(email)
+	feedback, err := listUserAllHabit("damlaprotel17@gmail.com")
+	fmt.Print(feedback)
 	if err != nil {
 		log.Println("Error fetching user habits:", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to fetch user habits"})
@@ -106,6 +115,7 @@ func ReturnFeedBack(c *fiber.Ctx) error {
 
 	// Get AI feedback
 	aiFeedback, err := GetFeedBackByUsingAI(feedback)
+	fmt.Print(aiFeedback)
 	if err != nil {
 		log.Println("Error getting AI feedback:", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to get AI feedback"})

@@ -49,10 +49,16 @@ func ListUsersAim(c *fiber.Ctx) error {
 	for i := range aims {
 		// Extract complete days from the string
 		completeDaysStr := aims[i].COMPLETE_DAYS
-		// Remove curly braces and split the string by commas
-		dates := strings.Split(strings.Trim(completeDaysStr, "{}"), ",")
-		// Count the number of dates
-		aims[i].CompleteDaysCount = len(dates) - 1
+
+		// Check if completeDaysStr is null or empty
+		if completeDaysStr == "" || completeDaysStr == "null" {
+			aims[i].CompleteDaysCount = 0
+		} else {
+			// Remove curly braces and split the string by commas
+			dates := strings.Split(strings.Trim(completeDaysStr, "{}"), ",")
+			// Count the number of dates
+			aims[i].CompleteDaysCount = len(dates)
+		}
 
 	}
 	// Filter active aims
@@ -475,4 +481,63 @@ func DeleteUserAim(c *fiber.Ctx) error {
 
 	// Return a success message
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "aim deleted successfully"})
+}
+
+// list expired habits
+func ListExpiredHabits(c *fiber.Ctx) error {
+
+	email := c.Query("email")
+	if email == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
+	}
+
+	userID, err := GetUserIDByEmail(email)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
+	}
+
+	type Aim struct {
+		Name              string `json:"name"`
+		COMPLETE_DAYS     string `json:"complete_days"`
+		Startday          string `json:"startday"`
+		Endday            string `json:"endday"`
+		NotificationHour  string `json:"notificationhour"`
+		CompleteDaysCount int    `json:"complete_days_count"`
+	}
+
+	// Fetch aims and time information associated with a user ID
+	var aims []Aim
+	if err := database.DB.Db.Raw(`
+        SELECT a.name, t.complete_days, a.startday, a.endday, a.notification_hour
+        FROM aims a
+        JOIN times t ON a.id = t.aim_id
+        WHERE a.user_id = ? `, userID).Scan(&aims).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+	}
+
+	// Calculate the count of complete days for each aim
+	for i := range aims {
+		// Extract complete days from the string
+		completeDaysStr := aims[i].COMPLETE_DAYS
+
+		// Check if completeDaysStr is null or empty
+		if completeDaysStr == "" || completeDaysStr == "null" {
+			aims[i].CompleteDaysCount = 0
+		} else {
+			// Remove curly braces and split the string by commas
+			dates := strings.Split(strings.Trim(completeDaysStr, "{}"), ",")
+			// Count the number of dates
+			aims[i].CompleteDaysCount = len(dates)
+		}
+
+	}
+	// Filter active aims
+	var activeAims []Aim
+	for _, aim := range aims {
+		if !IsAimActive(aim.Startday, aim.Endday) {
+			activeAims = append(activeAims, aim)
+		}
+	}
+	return c.Status(fiber.StatusOK).JSON(activeAims)
+
 }

@@ -35,4 +35,6 @@ func xRoutes(app *fiber.App) {
 	// send the users info to the ai and get the interpretation
 	app.Get("/getfeedback", handlers.ReturnFeedBack)
 
+	app.Get("/listexpiredhabits", handlers.ListExpiredHabits)
+
 }
