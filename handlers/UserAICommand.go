@@ -20,7 +20,8 @@ func listUserAllHabit(email string) (string, error) {
 	if err != nil {
 		return "", err // Return empty string and the error
 	}
-	// Aimss represents the structure for user habits.
+
+	// Aims represents the structure for user habits.
 	type Aimss struct {
 		Name              string `json:"name"`
 		CompleteDays      string `json:"complete_days"`
@@ -29,6 +30,7 @@ func listUserAllHabit(email string) (string, error) {
 		NotificationHour  string `json:"notification_hour"`
 		CompleteDaysCount int    `json:"complete_days_count"`
 	}
+
 	// Fetch aims and time information associated with a user ID
 	var aims []Aimss
 	rows, err := database.DB.Db.Raw(`
@@ -37,7 +39,7 @@ func listUserAllHabit(email string) (string, error) {
 		JOIN times t ON a.id = t.aim_id
 		WHERE a.user_id = ?`, userID).Rows()
 	if err != nil {
-		return "", err
+		return "null", err
 	}
 	defer rows.Close()
 
@@ -46,6 +48,12 @@ func listUserAllHabit(email string) (string, error) {
 		if err := rows.Scan(&aim.Name, &aim.CompleteDays, &aim.StartDay, &aim.EndDay, &aim.NotificationHour); err != nil {
 			return "", err
 		}
+
+		// Check if CompleteDays is null or empty
+		if aim.CompleteDays == "" {
+			return "null", nil // Return null for all values if CompleteDays is null
+		}
+
 		// Calculate the number of complete days
 		aim.CompleteDaysCount = len(strings.Split(strings.Trim(aim.CompleteDays, "{}"), ","))
 		aims = append(aims, aim)
@@ -106,7 +114,7 @@ func ReturnFeedBack(c *fiber.Ctx) error {
 	}
 
 	// Get user habit data
-	feedback, err := listUserAllHabit("damlaprotel17@gmail.com")
+	feedback, err := listUserAllHabit(email)
 	fmt.Print(feedback)
 	if err != nil {
 		log.Println("Error fetching user habits:", err)
@@ -114,7 +122,7 @@ func ReturnFeedBack(c *fiber.Ctx) error {
 	}
 
 	// Get AI feedback
-	aiFeedback, err := GetFeedBackByUsingAI(feedback)
+	aiFeedback, err := GetFeedBackByUsingAI(feedback + "observe these scredule, duration and completed days. Can you help me how can I improve myself more?")
 	fmt.Print(aiFeedback)
 	if err != nil {
 		log.Println("Error getting AI feedback:", err)

@@ -3,8 +3,10 @@ package handlers
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/damlaYasarr/aliveApp/database"
@@ -337,6 +339,51 @@ func ListActiveHabits(email string) ([]Aim, error) {
 
 	// Return active aims
 	return activeAims, nil
+}
+
+// it is not used
+func ListActiveHabitsTrial(users []models.User) (map[string][]Aim, error) {
+	var wg sync.WaitGroup
+	activeAimsMap := make(map[string][]Aim)
+
+	for _, user := range users {
+		wg.Add(1) // Her kullanıcı için bir iş parçacığı ekle
+
+		go func(user models.User) {
+			defer wg.Done() // İş parçacığı tamamlandığında sayacı azalt
+
+			// Kullanıcının ID'sini al
+			userID, err := GetUserIDByEmail(user.Email)
+			if err != nil {
+				log.Printf("User not found: %s, error: %v", user.Email, err)
+				return
+			}
+
+			// Veritabanından aktif hedefleri sorgula
+			var aims []Aim
+			if err := database.DB.Db.Raw(`
+                SELECT id, name, startday, endday, notification_hour
+                FROM aims
+                WHERE user_id = ?`, userID).Scan(&aims).Error; err != nil {
+				log.Printf("Failed to fetch user aims for %s: %v", user.Email, err)
+				return
+			}
+
+			// Aktif hedefleri filtrele
+			var activeAims []Aim
+			for _, aim := range aims {
+				if IsAimActive(aim.Startday, aim.Endday) {
+					activeAims = append(activeAims, aim)
+				}
+			}
+
+			// Aktif hedefleri haritaya ekle
+			activeAimsMap[user.Email] = activeAims
+		}(user)
+	}
+
+	wg.Wait()                 // Tüm iş parçacıklarının tamamlanmasını bekle
+	return activeAimsMap, nil // Kullanıcı e-postasına göre aktif hedefleri döndür
 }
 
 // ApprovalHabitDate handles the request to update the habit date

@@ -36,6 +36,7 @@ func main() {
 }
 
 func sendNotificationHandler(c *fiber.Ctx) error {
+
 	email := c.Query("email")
 	token := c.Query("token")
 	if token == "" {
