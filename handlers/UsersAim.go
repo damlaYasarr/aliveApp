@@ -208,7 +208,7 @@ func ListUsersActiveAim(c *fiber.Ctx) error {
 	if email == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
 	}
-
+	ListActiveHabits(email)
 	userID, err := GetUserIDByEmail(email)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
@@ -312,32 +312,38 @@ type Aim struct {
 }
 
 func ListActiveHabits(email string) ([]Aim, error) {
-	// Get user ID by email
+
 	userID, err := GetUserIDByEmail(email)
 	if err != nil {
-		// Handle user not found error
-		return nil, fiber.NewError(fiber.StatusNotFound, "user not found")
+
+		return nil, fiber.NewError(fiber.StatusNotFound, "kullanıcı bulunamadı")
 	}
 
-	// Query active aims from database
+	todayDate := fmt.Sprintf("%02d.%02d.%d", time.Now().Day(), time.Now().Month(), time.Now().Year())
+
 	var aims []Aim
 	if err := database.DB.Db.Raw(`
-        SELECT id, name, startday, endday, notification_hour
-        FROM aims
-        WHERE user_id = ?`, userID).Scan(&aims).Error; err != nil {
-		// Handle database query error
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "failed to fetch user aims")
+      SELECT a.id, a.name, a.startday, a.endday, a.notification_hour
+      FROM aims a
+      LEFT JOIN times t ON a.id = t.aim_id
+      WHERE a.user_id = ? AND (
+          t.complete_days IS NULL OR 
+          NOT t.complete_days @> ARRAY[?]::text[]
+      )
+      GROUP BY a.id, a.name, a.startday, a.endday, a.notification_hour;
+	`, userID, todayDate).Scan(&aims).Error; err != nil {
+
+		return nil, fiber.NewError(fiber.StatusInternalServerError, "kullanıcı hedeflerini almakta başarısız")
 	}
 
-	// Filter active aims
 	var activeAims []Aim
 	for _, aim := range aims {
 		if IsAimActive(aim.Startday, aim.Endday) {
 			activeAims = append(activeAims, aim)
 		}
 	}
+	fmt.Printf("Active Aims: %+v\n", activeAims)
 
-	// Return active aims
 	return activeAims, nil
 }
 
@@ -347,19 +353,17 @@ func ListActiveHabitsTrial(users []models.User) (map[string][]Aim, error) {
 	activeAimsMap := make(map[string][]Aim)
 
 	for _, user := range users {
-		wg.Add(1) // Her kullanıcı için bir iş parçacığı ekle
+		wg.Add(1)
 
 		go func(user models.User) {
-			defer wg.Done() // İş parçacığı tamamlandığında sayacı azalt
+			defer wg.Done()
 
-			// Kullanıcının ID'sini al
 			userID, err := GetUserIDByEmail(user.Email)
 			if err != nil {
 				log.Printf("User not found: %s, error: %v", user.Email, err)
 				return
 			}
 
-			// Veritabanından aktif hedefleri sorgula
 			var aims []Aim
 			if err := database.DB.Db.Raw(`
                 SELECT id, name, startday, endday, notification_hour
@@ -369,7 +373,6 @@ func ListActiveHabitsTrial(users []models.User) (map[string][]Aim, error) {
 				return
 			}
 
-			// Aktif hedefleri filtrele
 			var activeAims []Aim
 			for _, aim := range aims {
 				if IsAimActive(aim.Startday, aim.Endday) {
@@ -377,13 +380,12 @@ func ListActiveHabitsTrial(users []models.User) (map[string][]Aim, error) {
 				}
 			}
 
-			// Aktif hedefleri haritaya ekle
 			activeAimsMap[user.Email] = activeAims
 		}(user)
 	}
 
-	wg.Wait()                 // Tüm iş parçacıklarının tamamlanmasını bekle
-	return activeAimsMap, nil // Kullanıcı e-postasına göre aktif hedefleri döndür
+	wg.Wait()
+	return activeAimsMap, nil
 }
 
 // ApprovalHabitDate handles the request to update the habit date
